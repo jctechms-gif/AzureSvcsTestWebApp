@@ -1,0 +1,63 @@
+﻿@page
+@model MiKvSqlRazor.Pages.IndexModel
+@using Microsoft.Extensions.Configuration
+@{
+    ViewData["Title"] = "Managed Identity – Key Vault & Azure SQL";
+    var secretName = Model.SampleSecretName;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"]</title>
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+        .card { border: 1px solid #e5e7eb; border-radius: .5rem; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+        .row { display: flex; align-items: center; gap: .75rem; }
+        .status { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+        .ok { background: #16a34a; box-shadow: 0 0 8px rgba(22,163,74,.6); }
+        .fail { background: #dc2626; box-shadow: 0 0 8px rgba(220,38,38,.6); }
+        .label { font-weight: 600; }
+        code { background:#f3f4f6; padding: .125rem .25rem; border-radius: .25rem; }
+        .kv-value { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }
+        .hint { color:#6b7280; font-size:.9rem; }
+    </style>
+</head>
+<body>
+    <h1>Managed Identity Connectivity Check</h1>
+    <p class="hint">This page reads a secret from <strong>Azure Key Vault</strong> and opens a token-based connection to <strong>Azure SQL Database</strong>. Green = success; Red = failure.</p>
+
+    <div class="card">
+        <div class="row">
+            <span class="status @(Model.KeyVaultOk ? "ok" : "fail")"></span>
+            <span class="label">Key Vault secret retrieval</span>
+        </div>
+        @if (Model.KeyVaultOk)
+        {
+            <p>Secret value (<code>@secretName</code>):</p>
+            <div class="kv-value">@Model.KeyVaultValue</div>
+        }
+        else
+        {
+            <p style="color:#b91c1c">@Model.KeyVaultError</p>
+        }
+        <p class="hint">Do not show real secrets in production UI. This is for connectivity testing only.</p>
+    </div>
+
+    <div class="card">
+        <div class="row">
+            <span class="status @(Model.SqlOk ? "ok" : "fail")"></span>
+            <span class="label">Azure SQL connection (Managed Identity)</span>
+        </div>
+        @if (Model.SqlOk)
+        {
+            <p>Probe query returned: <code>@Model.SqlProbeResult</code></p>
+        }
+        else
+        {
+            <p style="color:#b91c1c">@Model.SqlError</p>
+        }
+    </div>
+</body>
+</html>
