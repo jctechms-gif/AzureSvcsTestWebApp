@@ -1,0 +1,12 @@
+[
+  {
+    "ContainingType": "SvcTestApp.Controllers.DbPingController",
+    "Method": "Ping",
+    "RelativePath": "db-ping",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  }
+]

@@ -1,9 +1,9 @@
 ﻿@page
 @model MiKvSqlRazor.Pages.IndexModel
-@using Microsoft.Extensions.Configuration
+@using MiKvSqlRazor.Models
+@using System.Security.Cryptography
 @{
-    ViewData["Title"] = "Managed Identity – Key Vault & Azure SQL";
-    var secretName = Model.SampleSecretName;
+    ViewData["Title"] = "Azure Connectivity Diagnostics";
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -12,52 +12,342 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@ViewData["Title"]</title>
     <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
-        .card { border: 1px solid #e5e7eb; border-radius: .5rem; padding: 1rem 1.25rem; margin-bottom: 1rem; }
-        .row { display: flex; align-items: center; gap: .75rem; }
-        .status { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-        .ok { background: #16a34a; box-shadow: 0 0 8px rgba(22,163,74,.6); }
-        .fail { background: #dc2626; box-shadow: 0 0 8px rgba(220,38,38,.6); }
-        .label { font-weight: 600; }
-        code { background:#f3f4f6; padding: .125rem .25rem; border-radius: .25rem; }
-        .kv-value { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }
-        .hint { color:#6b7280; font-size:.9rem; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: #f5f5f5;
+            padding: 2rem;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { font-size: 2rem; font-weight: 600; color: #202020; margin-bottom: 0.5rem; }
+        .subtitle { color: #605e5c; font-size: 0.95rem; margin-bottom: 2rem; }
+        
+        /* Authentication Method Card */
+        .auth-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .auth-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+        .auth-icon {
+            width: 32px;
+            height: 32px;
+            background: #fef3c7;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+        .auth-header h2 { font-size: 1.1rem; font-weight: 600; color: #202020; }
+        .radio-group { display: flex; gap: 2rem; }
+        .radio-option { display: flex; align-items: center; gap: 0.5rem; }
+        .radio-option input[type="radio"] { 
+            width: 20px; 
+            height: 20px; 
+            cursor: pointer;
+            accent-color: #0078d4;
+        }
+        .radio-option label { cursor: pointer; font-size: 0.95rem; color: #323130; }
+        
+        /* Diagnostic Cards Grid */
+        .diagnostics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .diagnostic-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        .diagnostic-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+        .diagnostic-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+        .icon-error {
+            background: #dc3545;
+            color: white;
+        }
+        .icon-success {
+            background: #28a745;
+            color: white;
+        }
+        .icon-info {
+            background: #6c757d;
+            color: white;
+        }
+        .diagnostic-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #202020;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .status-failed {
+            background: #dc3545;
+            color: white;
+        }
+        .status-success {
+            background: #28a745;
+            color: white;
+        }
+        .status-unhealthy {
+            background: #dc3545;
+            color: white;
+        }
+        .diagnostic-message {
+            color: #605e5c;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        
+        /* Error Details Section */
+        .error-details {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .error-details summary {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            font-weight: 600;
+            color: #202020;
+            list-style: none;
+            user-select: none;
+        }
+        .error-details summary::-webkit-details-marker { display: none; }
+        .error-details summary::before {
+            content: '▼';
+            display: inline-block;
+            font-size: 0.75rem;
+            transition: transform 0.2s;
+            color: #0078d4;
+        }
+        .error-details:not([open]) summary::before {
+            transform: rotate(-90deg);
+        }
+        .error-content {
+            margin-top: 1.5rem;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+        }
+        .error-section h4 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #202020;
+            margin-bottom: 0.5rem;
+        }
+        .error-section .method-label {
+            color: #605e5c;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+        .error-section .error-msg {
+            color: #323130;
+            font-size: 0.85rem;
+            line-height: 1.6;
+            padding: 0.5rem;
+            background: #f9f9f9;
+            border-left: 3px solid #dc3545;
+            margin-bottom: 0.5rem;
+        }
+        .error-icon {
+            color: #dc3545;
+            margin-right: 0.25rem;
+        }
+        
+        @@media (max-width: 768px) {
+            .diagnostics-grid,
+            .error-content {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
+    <script>
+        function changeAuthMethod() {
+            const selectedMethod = document.querySelector('input[name="authMethod"]:checked').value;
+            window.location.href = `?SelectedAuthMethod=${selectedMethod}`;
+        }
+    </script>
 </head>
 <body>
-    <h1>Managed Identity Connectivity Check</h1>
-    <p class="hint">This page reads a secret from <strong>Azure Key Vault</strong> and opens a token-based connection to <strong>Azure SQL Database</strong>. Green = success; Red = failure.</p>
+    <div class="container">
+        <h1>Azure Connectivity Diagnostics</h1>
+        <p class="subtitle">Validate authentication, Key Vault access, and Azure SQL connectivity.</p>
 
-    <div class="card">
-        <div class="row">
-            <span class="status @(Model.KeyVaultOk ? "ok" : "fail")"></span>
-            <span class="label">Key Vault secret retrieval</span>
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="auth-icon">🔐</div>
+                <h2>Authentication Method</h2>
+            </div>
+            <div class="radio-group">
+                <div class="radio-option">
+                    <input type="radio" 
+                           id="managedIdentity" 
+                           name="authMethod" 
+                           value="ManagedIdentity" 
+                           @(Model.SelectedAuthMethod == AuthMethod.ManagedIdentity ? "checked" : "")
+                           onchange="changeAuthMethod()" />
+                    <label for="managedIdentity">Managed Identity</label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" 
+                           id="servicePrincipal" 
+                           name="authMethod" 
+                           value="ServicePrincipal" 
+                           @(Model.SelectedAuthMethod == AuthMethod.ServicePrincipal ? "checked" : "")
+                           onchange="changeAuthMethod()" />
+                    <label for="servicePrincipal">Service Principal</label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" 
+                           id="userAzureId" 
+                           name="authMethod" 
+                           value="UserAzureId" 
+                           @(Model.SelectedAuthMethod == AuthMethod.UserAzureId ? "checked" : "")
+                           onchange="changeAuthMethod()" />
+                    <label for="userAzureId">User Azure ID</label>
+                </div>
+            </div>
         </div>
-        @if (Model.KeyVaultOk)
-        {
-            <p>Secret value (<code>@secretName</code>):</p>
-            <div class="kv-value">@Model.KeyVaultValue</div>
-        }
-        else
-        {
-            <p style="color:#b91c1c">@Model.KeyVaultError</p>
-        }
-        <p class="hint">Do not show real secrets in production UI. This is for connectivity testing only.</p>
-    </div>
 
-    <div class="card">
-        <div class="row">
-            <span class="status @(Model.SqlOk ? "ok" : "fail")"></span>
-            <span class="label">Azure SQL connection (Managed Identity)</span>
+        <div class="diagnostics-grid">
+            <!-- Token Acquisition Card -->
+            <div class="diagnostic-card">
+                <div class="diagnostic-header">
+                    <div class="diagnostic-icon @(Model.TokenAcquisitionOk ? "icon-success" : "icon-error")">
+                        @(Model.TokenAcquisitionOk ? "✓" : "✕")
+                    </div>
+                    <h3>Token Acquisition</h3>
+                </div>
+                <div class="status-badge @(Model.TokenAcquisitionOk ? "status-success" : "status-failed")">
+                    @(Model.TokenAcquisitionOk ? "Success" : "Failed")
+                </div>
+                <p class="diagnostic-message">@Model.TokenAcquisitionMessage</p>
+            </div>
+
+            <!-- Key Vault Access Card -->
+            <div class="diagnostic-card">
+                <div class="diagnostic-header">
+                    <div class="diagnostic-icon @(Model.KeyVaultOk ? "icon-success" : "icon-error")">
+                        @(Model.KeyVaultOk ? "✓" : "✕")
+                    </div>
+                    <h3>Key Vault Access</h3>
+                </div>
+                <div class="status-badge @(Model.KeyVaultOk ? "status-success" : "status-failed")">
+                    @(Model.KeyVaultOk ? "Success" : "Failed")
+                </div>
+                <p class="diagnostic-message">@Model.KeyVaultMessage</p>
+            </div>
+
+            <!-- Azure SQL Connectivity Card -->
+            <div class="diagnostic-card">
+                <div class="diagnostic-header">
+                    <div class="diagnostic-icon @(Model.SqlOk ? "icon-success" : "icon-error")">
+                        @(Model.SqlOk ? "✓" : "✕")
+                    </div>
+                    <h3>Azure SQL Connectivity</h3>
+                </div>
+                <div class="status-badge @(Model.SqlOk ? "status-success" : "status-failed")">
+                    @(Model.SqlOk ? "Success" : "Failed")
+                </div>
+                <p class="diagnostic-message">@Model.SqlMessage</p>
+            </div>
+
+            <!-- Overall Status Card -->
+            <div class="diagnostic-card">
+                <div class="diagnostic-header">
+                    <div class="diagnostic-icon icon-info">
+                        🛡️
+                    </div>
+                    <h3>Overall Status</h3>
+                </div>
+                <div class="status-badge @(Model.OverallHealthy ? "status-success" : "status-unhealthy")">
+                    @(Model.OverallHealthy ? "Healthy" : "Not Healthy")
+                </div>
+                <p class="diagnostic-message">@Model.OverallStatusMessage</p>
+            </div>
         </div>
-        @if (Model.SqlOk)
-        {
-            <p>Probe query returned: <code>@Model.SqlProbeResult</code></p>
-        }
-        else
-        {
-            <p style="color:#b91c1c">@Model.SqlError</p>
-        }
+
+        <details class="error-details">
+            <summary>Error Details</summary>
+            <div class="error-content">
+                <div>
+                    <div class="error-section">
+                        <h4>Authentication Token Acquisition <span class="method-label">(@Model.SelectedAuthMethod)</span></h4>
+                        @if (!Model.TokenAcquisitionOk)
+                        {
+                            <div class="error-msg">
+                                <span class="error-icon">🔻</span> @Model.TokenAcquisitionError
+                            </div>
+                        }
+                        else
+                        {
+                            <p style="color: #28a745; font-size: 0.9rem;">✓ @Model.TokenAcquisitionValue</p>
+                        }
+                    </div>
+
+                    <div class="error-section" style="margin-top: 1.5rem;">
+                        <h4>Azure SQL connection <span class="method-label">(@Model.SelectedAuthMethod)</span></h4>
+                        @if (!Model.SqlOk)
+                        {
+                            <div class="error-msg">@Model.SqlError</div>
+                        }
+                        else
+                        {
+                            <p style="color: #28a745; font-size: 0.9rem;">✓ Connected successfully. Query result: @Model.SqlProbeResult</p>
+                        }
+                    </div>
+                </div>
+
+                <div>
+                    <div class="error-section">
+                        <h4><span class="error-icon">🔻</span> Key Vault secret retrieval</h4>
+                        @if (!Model.KeyVaultOk)
+                        {
+                            <div class="error-msg">@Model.KeyVaultError</div>
+                        }
+                        else
+                        {
+                            <p style="color: #28a745; font-size: 0.9rem;">✓ Secret retrieved successfully</p>
+                        }
+                    </div>
+                </div>
+            </div>
+        </details>
     </div>
 </body>
 </html>
