@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SvcTestApp")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b7ea3977164a217ebc4479808ab0924b2d7946e8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5cb5bc6347b2063c177d7b1df423f31d89869d9c")]
 [assembly: System.Reflection.AssemblyProductAttribute("SvcTestApp")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SvcTestApp")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
