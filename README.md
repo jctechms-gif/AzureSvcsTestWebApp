@@ -1,49 +1,72 @@
 # AzureSvcsTestWebApp
 
-An ASP.NET Core web application that demonstrates passwordless authentication with Azure SQL Database using Azure Key Vault and Entity Framework Core.
+An ASP.NET Core web application that demonstrates authentication with Azure SQL Database using Service Principal credentials from Azure Key Vault and Entity Framework Core.
 
 ## Architecture Overview
 
 This application uses:
 - **Entity Framework Core** with SQL Server provider
-- **Azure Key Vault** for secure connection string storage
-- **DefaultAzureCredential** for passwordless authentication
+- **Azure Key Vault** for secure credential and connection string storage
+- **Service Principal authentication** with Microsoft Entra ID for database access
 - **Microsoft.Data.SqlClient** for SQL Server connectivity
-- **Passwordless SQL authentication** using Entra ID (Azure Active Directory)
+- **ClientSecretCredential** for Service Principal authentication
+
+## Authentication Flow
+
+1. **Bootstrap**: Application starts with `DefaultAzureCredential` to access Key Vault
+2. **Retrieve Credentials**: Gets Service Principal credentials (Tenant ID, Client ID, Client Secret) from Key Vault
+3. **Create Authentication**: Creates `ClientSecretCredential` using Service Principal details
+4. **Database Connection**: Uses Service Principal to authenticate with SQL Database via connection string
 
 ## Prerequisites
 
 ### 1. Azure Key Vault Setup
-- An Azure Key Vault with a secret named `Sql--ConnectionString` (configurable via `Azure:SqlConnectionStringSecretName`)
-- The connection string should use Entra ID authentication, for example:
-  ```
-  Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;Encrypt=True;TrustServerCertificate=False;Authentication=Active Directory Default;
-  ```
+Required secrets in Key Vault:
+- `SPTenantId` - Service Principal Tenant ID (configurable via `Azure:SPTenantIDSecretName`)
+- `SPClientID` - Service Principal Client ID (configurable via `Azure:SPClienttIDSecretName`) 
+- `SPClientSecret` - Service Principal Client Secret (configurable via `Azure:SPClientSecretSecretName`)
+- `SqlConnectionString` - Database connection string (configurable via `Azure:SqlConnectionStringSecretName`)
 
-### 2. SQL Server Setup (One-time)
+### 2. Service Principal Setup
+1. **Create Service Principal**:
+   ```bash
+   az ad sp create-for-rbac --name "YourAppServicePrincipal" --role contributor --scopes /subscriptions/{subscription-id}/resourceGroups/{resource-group}
+   ```
+   
+2. **Store credentials in Key Vault**:
+   ```bash
+   az keyvault secret set --vault-name "your-keyvault" --name "SPTenantId" --value "{tenant-id}"
+   az keyvault secret set --vault-name "your-keyvault" --name "SPClientID" --value "{client-id}"
+   az keyvault secret set --vault-name "your-keyvault" --name "SPClientSecret" --value "{client-secret}"
+   ```
+
+### 3. SQL Server Setup
 1. **Set Entra ID admin** on the SQL server:
-   ```sql
-   -- Run this in Azure portal or using Azure CLI
+   ```bash
    az sql server ad-admin create --resource-group <rg> --server-name <server> --display-name <admin-name> --object-id <admin-object-id>
    ```
 
-2. **Create contained user** for the application's managed identity:
+2. **Create contained user** for the Service Principal:
    ```sql
    -- Connect to the database using Entra ID admin
-   CREATE USER [<app-name>] FROM EXTERNAL PROVIDER;
+   CREATE USER [YourAppServicePrincipal] FROM EXTERNAL PROVIDER;
    
    -- Grant minimal required permissions
-   ALTER ROLE db_datareader ADD MEMBER [<app-name>];
-   ALTER ROLE db_datawriter ADD MEMBER [<app-name>];
+   ALTER ROLE db_datareader ADD MEMBER [YourAppServicePrincipal];
+   ALTER ROLE db_datawriter ADD MEMBER [YourAppServicePrincipal];
    
    -- Optional: If running migrations in production
-   ALTER ROLE db_ddladmin ADD MEMBER [<app-name>];
+   ALTER ROLE db_ddladmin ADD MEMBER [YourAppServicePrincipal];
    ```
 
-### 3. Access Permissions
-The application's identity (local dev user or managed identity) needs:
-- **Key Vault**: `Key Vault Secrets User` role or access policy for "Get" secret permissions
-- **SQL Database**: Contained user with appropriate database roles (see above)
+3. **Connection string format**:
+   ```
+   Server=tcp:<server>.database.windows.net,1433;Initial Catalog=<database>;Encrypt=True;TrustServerCertificate=False;Authentication=Active Directory Service Principal;
+   ```
+
+### 4. Access Permissions
+The bootstrap identity (local dev user or managed identity) needs:
+- **Key Vault**: `Key Vault Secrets User` role or access policy for "Get" secret permissions on the credential secrets
 
 ## Configuration
 

@@ -2,6 +2,7 @@ using Azure.Core;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SvcTestApp.Data;
 using SvcTestApp.Extensions;
 
@@ -10,24 +11,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorPages();
 builder.Services.AddControllers();
 
-// Note: With the toggle feature, credentials are now created dynamically in IndexModel
-// You can keep this for other services that need a default credential
+// Service Principal credentials will be retrieved from Key Vault
+// Initialize with DefaultAzureCredential first to access Key Vault
 builder.Services.AddSingleton<TokenCredential>(sp =>
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-    var defaultMethod = config["Azure:DefaultAuthMethod"];
-    
-    return defaultMethod switch
+    // This will be replaced with Service Principal credentials after Key Vault retrieval
+    return new DefaultAzureCredential(new DefaultAzureCredentialOptions
     {
-        "ServicePrincipal" => new ClientSecretCredential(
-            config["Azure:ServicePrincipal:TenantId"],
-            config["Azure:ServicePrincipal:ClientId"],
-            config["Azure:ServicePrincipal:ClientSecret"]),
-        _ => new DefaultAzureCredential(new DefaultAzureCredentialOptions
-        {
-            ExcludeInteractiveBrowserCredential = true
-        })
-    };
+        ExcludeInteractiveBrowserCredential = true
+    });
 });
 
 // Register SecretClient for Key Vault
@@ -50,21 +42,48 @@ bool keyVaultAvailable = false;
 
 try
 {
-    var secretName = builder.Configuration["Azure:SqlConnectionStringSecretName"] ?? "Sql--ConnectionString";
-    logger.LogInformation("Retrieving connection string from Key Vault secret: {SecretName}", secretName);
+    logger.LogInformation("Retrieving Service Principal credentials from Key Vault");
     
-    // Use the safer extension method for Key Vault access
-    connectionString = await secretClient.GetSecretSafelyAsync(secretName, logger);
+    // Retrieve Service Principal credentials from Key Vault using extension method
+    var tenantIdSecretName = builder.Configuration["Azure:SPTenantIDSecretName"] ?? "SPTenantId";
+    var clientIdSecretName = builder.Configuration["Azure:SPClienttIDSecretName"] ?? "SPClientID";
+    var clientSecretSecretName = builder.Configuration["Azure:SPClientSecretSecretName"] ?? "SPClientSecret";
+    
+    var (tenantId, clientId, clientSecret) = await secretClient.GetServicePrincipalCredentialsAsync(
+        tenantIdSecretName, clientIdSecretName, clientSecretSecretName, logger);
+    
+    // Create new Service Principal credential
+    var servicePrincipalCredential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+    
+    // Update the TokenCredential service registration
+    builder.Services.RemoveAll<TokenCredential>();
+    builder.Services.AddSingleton<TokenCredential>(servicePrincipalCredential);
+    
+    // Create new SecretClient with Service Principal credentials
+    var vaultUrl = builder.Configuration["Azure:KeyVaultUrl"] ?? throw new InvalidOperationException("Azure:KeyVaultUrl is required");
+    var newSecretClient = new SecretClient(new Uri(vaultUrl), servicePrincipalCredential);
+    
+    // Update the SecretClient service registration
+    builder.Services.RemoveAll<SecretClient>();
+    builder.Services.AddSingleton(newSecretClient);
+    
+    logger.LogInformation("Successfully configured Service Principal authentication from Key Vault");
+    
+    // Now retrieve the SQL connection string using Service Principal credentials
+    var sqlSecretName = builder.Configuration["Azure:SqlConnectionStringSecretName"] ?? "SqlConnectionString";
+    logger.LogInformation("Retrieving connection string from Key Vault secret: {SecretName}", sqlSecretName);
+    
+    connectionString = await newSecretClient.GetSecretSafelyAsync(sqlSecretName, logger);
     
     // Add the connection string to configuration
     builder.Configuration["ConnectionStrings:Default"] = connectionString;
     keyVaultAvailable = true;
     
-    logger.LogInformation("Successfully configured connection string from Key Vault");
+    logger.LogInformation("Successfully configured connection string from Key Vault using Service Principal");
 }
 catch (Exception ex)
 {
-    logger.LogWarning(ex, "Failed to retrieve connection string from Key Vault: {Message}. Application will start without database connectivity.", ex.Message);
+    logger.LogWarning(ex, "Failed to retrieve Service Principal credentials or connection string from Key Vault: {Message}. Application will start with default credentials and without database connectivity.", ex.Message);
     
     // Use a fallback connection string (won't work, but allows app to start)
     // You can also use a local connection string from appsettings.json if available
@@ -74,8 +93,13 @@ catch (Exception ex)
     builder.Configuration["ConnectionStrings:Default"] = connectionString;
 }
 
-// Store Key Vault availability status for health checks
+// Store Key Vault availability status and auth method for health checks
 builder.Services.AddSingleton(new KeyVaultHealthStatus { IsAvailable = keyVaultAvailable });
+builder.Services.AddSingleton(new AuthenticationStatus 
+{ 
+    Method = keyVaultAvailable ? "ServicePrincipal" : "DefaultAzureCredential",
+    IsConfiguredFromKeyVault = keyVaultAvailable 
+});
 
 // Register EF Core with SQL Server provider (uses Microsoft.Data.SqlClient internally)
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -101,7 +125,18 @@ builder.Services.AddHealthChecks()
         return kvStatus.IsAvailable
             ? Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Key Vault is accessible")
             : Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Key Vault is not accessible");
-    }, tags: new[] { "keyvault" });
+    }, tags: new[] { "keyvault" })
+    .AddCheck("authentication", () =>
+    {
+        var authStatus = serviceProvider.GetRequiredService<AuthenticationStatus>();
+        var result = authStatus.IsConfiguredFromKeyVault
+            ? $"Authentication configured using {authStatus.Method} from Key Vault"
+            : $"Authentication using fallback {authStatus.Method}";
+        
+        return authStatus.IsConfiguredFromKeyVault
+            ? Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy(result)
+            : Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Degraded(result);
+    }, tags: new[] { "auth" });
 
 var app = builder.Build();
 
@@ -122,8 +157,14 @@ app.MapHealthChecks("/health"); // Add health check endpoint
 
 app.Run();
 
-// Helper class to track Key Vault availability
+// Helper classes to track Key Vault and authentication status
 public class KeyVaultHealthStatus
 {
     public bool IsAvailable { get; set; }
+}
+
+public class AuthenticationStatus
+{
+    public string Method { get; set; } = "";
+    public bool IsConfiguredFromKeyVault { get; set; }
 }

@@ -50,4 +50,51 @@ public static class KeyVaultExtensions
             throw new InvalidOperationException($"Failed to retrieve secret '{secretName}' from Key Vault", ex);
         }
     }
+
+    /// <summary>
+    /// Retrieves Service Principal credentials from Key Vault
+    /// </summary>
+    /// <param name="secretClient">The SecretClient instance</param>
+    /// <param name="tenantIdSecretName">Name of the tenant ID secret</param>
+    /// <param name="clientIdSecretName">Name of the client ID secret</param>
+    /// <param name="clientSecretSecretName">Name of the client secret</param>
+    /// <param name="logger">Logger for diagnostics</param>
+    /// <returns>A tuple containing (tenantId, clientId, clientSecret)</returns>
+    public static async Task<(string TenantId, string ClientId, string ClientSecret)> GetServicePrincipalCredentialsAsync(
+        this SecretClient secretClient, 
+        string tenantIdSecretName, 
+        string clientIdSecretName, 
+        string clientSecretSecretName, 
+        ILogger logger)
+    {
+        try
+        {
+            logger.LogInformation("Retrieving Service Principal credentials from Key Vault");
+            
+            // Retrieve all three secrets concurrently for better performance
+            var tenantTask = secretClient.GetSecretSafelyAsync(tenantIdSecretName, logger);
+            var clientIdTask = secretClient.GetSecretSafelyAsync(clientIdSecretName, logger);
+            var clientSecretTask = secretClient.GetSecretSafelyAsync(clientSecretSecretName, logger);
+            
+            await Task.WhenAll(tenantTask, clientIdTask, clientSecretTask);
+            
+            var tenantId = await tenantTask;
+            var clientId = await clientIdTask;
+            var clientSecret = await clientSecretTask;
+            
+            // Validate that all credentials are present
+            if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+            {
+                throw new InvalidOperationException("One or more Service Principal credential values are empty");
+            }
+            
+            logger.LogInformation("Successfully retrieved all Service Principal credentials from Key Vault");
+            return (tenantId, clientId, clientSecret);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to retrieve Service Principal credentials from Key Vault: {Message}", ex.Message);
+            throw;
+        }
+    }
 }
